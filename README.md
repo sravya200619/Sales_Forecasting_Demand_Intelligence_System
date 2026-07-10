@@ -6,7 +6,7 @@ This project is an end-to-end retail sales forecasting system developed using Ma
 
 The application predicts future product demand, detects sales anomalies, segments products based on demand patterns, and provides an interactive business dashboard using Streamlit.
 
----
+
 
 ## Features
 
@@ -22,7 +22,7 @@ The application predicts future product demand, detects sales anomalies, segment
 - K-Means Clustering
 - Interactive Streamlit Dashboard
 
----
+
 
 ## Technologies Used
 
@@ -36,7 +36,7 @@ The application predicts future product demand, detects sales anomalies, segment
 - Statsmodels
 - Scikit-Learn
 
----
+
 
 ## Folder Structure
 
@@ -63,7 +63,7 @@ SalesForecasting_Sravya/
 └── analysis.ipynb
 ```
 
----
+
 
 ## Installation
 
@@ -77,7 +77,7 @@ Run
 streamlit run app.py
 ```
 
----
+
 
 ## Dashboard Pages
 
@@ -112,9 +112,13 @@ streamlit run app.py
 - XGBoost
 - Performance Metrics
 
----
-Streamlit Deployed link
+
+Streamlit Deployed url
 https://sravya200619-sales-forecasting-demand-intelligence-s-app-yknaso.streamlit.app
+
+Linkedin url
+www.linkedin.com/in/veera-venkata-lakshmi-sravya-velaga-a79a78378
+
 
 ## Author
 
