@@ -112,9 +112,8 @@ streamlit run app.py
 - XGBoost
 - Performance Metrics
 
-
-Streamlit Deployed url
-https://sravya200619-sales-forecasting-demand-intelligence-s-app-yknaso.streamlit.app
+Deployed Streamlit url
+https://sravya200619-sales-forecasting-demand-intelligence-s-app-qj8soc.streamlit.app/Forecast_Explorer
 
 Linkedin url
 www.linkedin.com/in/veera-venkata-lakshmi-sravya-velaga-a79a78378
