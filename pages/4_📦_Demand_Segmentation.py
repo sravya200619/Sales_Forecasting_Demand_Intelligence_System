@@ -7,6 +7,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 
+# -------------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------------
+
 st.set_page_config(
     page_title="Demand Segmentation",
     page_icon="📦",
@@ -16,8 +20,8 @@ st.set_page_config(
 st.title("📦 Product Demand Segmentation")
 
 st.markdown("""
-Cluster product sub-categories based on sales performance, demand growth,
-profitability, and volatility using **K-Means Clustering**.
+Cluster product sub-categories based on historical sales
+using **K-Means Clustering**.
 """)
 
 # -------------------------------------------------------
@@ -29,11 +33,19 @@ def load_data():
 
     df = pd.read_csv("train.csv")
 
-    df["Order Date"] = pd.to_datetime(df["Order Date"])
+    df["Order Date"] = pd.to_datetime(
+        df["Order Date"],
+        dayfirst=True,
+        errors="coerce"
+    )
+
+    df = df.dropna(subset=["Order Date"])
 
     df["Year"] = df["Order Date"].dt.year
+    df["Month"] = df["Order Date"].dt.month
 
     return df
+
 
 df = load_data()
 
@@ -41,134 +53,70 @@ df = load_data()
 # FEATURE ENGINEERING
 # -------------------------------------------------------
 
-product = df.groupby("Sub-Category").agg({
-
-    "Sales":"sum",
-    "Quantity":"sum",
-    "Discount":"mean",
-    "Profit":"sum"
-
-}).reset_index()
-
-product.columns = [
-
-    "SubCategory",
-    "TotalSales",
-    "TotalQuantity",
-    "AverageDiscount",
-    "TotalProfit"
-
-]
-
-avg_order = (
-
-    df
-
-    .groupby("Sub-Category")["Sales"]
-
-    .mean()
-
+product = (
+    df.groupby("Sub-Category")
+      .agg(
+          TotalSales=("Sales", "sum"),
+          AverageSales=("Sales", "mean"),
+          MaxSales=("Sales", "max"),
+          MinSales=("Sales", "min"),
+          OrderCount=("Sales", "count")
+      )
+      .reset_index()
 )
 
-product["AverageOrderValue"] = avg_order.values
+# -------------------------------------------------------
+# MONTHLY SALES
+# -------------------------------------------------------
 
 monthly = (
-
-    df
-
-    .groupby([
-
-        "Sub-Category",
-
-        pd.Grouper(
-
-            key="Order Date",
-
-            freq="M"
-
-        )
-
-    ])["Sales"]
-
+    df.groupby(
+        [
+            "Sub-Category",
+            pd.Grouper(key="Order Date", freq="ME")
+        ]
+    )["Sales"]
     .sum()
-
     .reset_index()
-
 )
 
 volatility = (
-
-    monthly
-
-    .groupby("Sub-Category")["Sales"]
-
+    monthly.groupby("Sub-Category")["Sales"]
     .std()
-
 )
 
-product["SalesVolatility"] = volatility.values
+product["SalesVolatility"] = (
+    product["Sub-Category"]
+    .map(volatility)
+)
+
+product["SalesVolatility"] = product["SalesVolatility"].fillna(0)
+# -------------------------------------------------------
+# YEARLY GROWTH
+# -------------------------------------------------------
 
 yearly = (
-
-    df
-
-    .groupby([
-
-        "Sub-Category",
-
-        "Year"
-
-    ])["Sales"]
-
-    .sum()
-
-    .reset_index()
-
+    df.groupby(["Sub-Category", "Year"])["Sales"]
+      .sum()
+      .reset_index()
 )
 
-yearly["Growth"] = (
-
-    yearly
-
-    .groupby("Sub-Category")["Sales"]
-
-    .pct_change()
-
+yearly["GrowthRate"] = (
+    yearly.groupby("Sub-Category")["Sales"]
+          .pct_change()
 )
 
 growth = (
-
-    yearly
-
-    .groupby("Sub-Category")["Growth"]
-
-    .mean()
-
+    yearly.groupby("Sub-Category")["GrowthRate"]
+          .mean()
 )
 
-product["GrowthRate"] = growth.values
-
-product["ProfitMargin"] = (
-
-    product["TotalProfit"]
-
-    /
-
-    product["TotalSales"]
-
-) * 100
-
-product.fillna(0, inplace=True)
-
-st.subheader("Engineered Product Features")
-
-st.dataframe(
-
-    product,
-
-    use_container_width=True
-
+product["GrowthRate"] = (
+    product["Sub-Category"]
+           .map(growth)
 )
+
+product["GrowthRate"] = product["GrowthRate"].fillna(0)
 
 # -------------------------------------------------------
 # FEATURE SCALING
@@ -176,13 +124,16 @@ st.dataframe(
 
 features = product[[
     "TotalSales",
-    "TotalQuantity",
-    "AverageOrderValue",
+    "AverageSales",
+    "MaxSales",
+    "MinSales",
+    "OrderCount",
     "SalesVolatility",
-    "AverageDiscount",
-    "ProfitMargin",
     "GrowthRate"
 ]]
+
+features = features.replace([np.inf, -np.inf], 0)
+features = features.fillna(0)
 
 scaler = StandardScaler()
 
@@ -194,50 +145,34 @@ scaled_features = scaler.fit_transform(features)
 
 wcss = []
 
-for i in range(2,9):
+for i in range(2, 9):
 
     model = KMeans(
-
         n_clusters=i,
-
         random_state=42,
-
         n_init=20
-
     )
 
     model.fit(scaled_features)
 
     wcss.append(model.inertia_)
 
-st.subheader("Elbow Method")
+st.subheader("📈 Elbow Method")
 
-fig_elbow = px.line(
-
-    x=list(range(2,9)),
-
+fig = px.line(
+    x=list(range(2, 9)),
     y=wcss,
-
     markers=True,
-
     labels={
-
-        "x":"Number of Clusters",
-
-        "y":"WCSS"
-
+        "x": "Number of Clusters",
+        "y": "WCSS"
     },
-
-    title="Elbow Method"
-
+    title="Elbow Method for Optimal Clusters"
 )
 
 st.plotly_chart(
-
-    fig_elbow,
-
+    fig,
     use_container_width=True
-
 )
 
 # -------------------------------------------------------
@@ -245,81 +180,50 @@ st.plotly_chart(
 # -------------------------------------------------------
 
 kmeans = KMeans(
-
     n_clusters=4,
-
     random_state=42,
-
     n_init=20
-
 )
 
 product["Cluster"] = kmeans.fit_predict(
-
     scaled_features
-
 )
-
 # -------------------------------------------------------
-# PCA
+# PCA VISUALIZATION
 # -------------------------------------------------------
 
-pca = PCA(n_components=2)
+pca = PCA(n_components=2, random_state=42)
 
-components = pca.fit_transform(
-
-    scaled_features
-
-)
+components = pca.fit_transform(scaled_features)
 
 plot_df = pd.DataFrame({
-
-    "PC1":components[:,0],
-
-    "PC2":components[:,1],
-
-    "Cluster":product["Cluster"],
-
-    "SubCategory":product["SubCategory"]
-
+    "PC1": components[:, 0],
+    "PC2": components[:, 1],
+    "Cluster": product["Cluster"].astype(str),
+    "SubCategory": product["Sub-Category"],
+    "TotalSales": product["TotalSales"]
 })
 
-# -------------------------------------------------------
-# CLUSTER VISUALIZATION
-# -------------------------------------------------------
-
-st.subheader("Demand Segmentation Clusters")
+st.subheader("📦 Product Demand Clusters")
 
 fig_cluster = px.scatter(
-
     plot_df,
-
     x="PC1",
-
     y="PC2",
-
-    color=plot_df["Cluster"].astype(str),
-
+    color="Cluster",
+    hover_name="SubCategory",
+    hover_data=["TotalSales"],
     text="SubCategory",
-
-    size_max=18,
-
     title="K-Means Product Segmentation"
-
 )
 
 fig_cluster.update_traces(
-
     textposition="top center"
-
 )
 
 st.plotly_chart(
-
     fig_cluster,
-
     use_container_width=True
-
 )
 
 # -------------------------------------------------------
@@ -327,51 +231,51 @@ st.plotly_chart(
 # -------------------------------------------------------
 
 summary = (
-
-    product
-
-    .groupby("Cluster")
-
-    .mean(numeric_only=True)
-
+    product.groupby("Cluster")
+           .agg({
+               "TotalSales": "mean",
+               "AverageSales": "mean",
+               "OrderCount": "mean",
+               "SalesVolatility": "mean",
+               "GrowthRate": "mean"
+           })
+           .round(2)
 )
 
-st.subheader("Cluster Summary")
+st.subheader("📊 Cluster Summary")
 
 st.dataframe(
-
     summary,
-
     use_container_width=True
-
 )
 
-st.divider()
-
 # -------------------------------------------------------
-# DEMAND SEGMENT LABELS
+# SEGMENT LABELS
 # -------------------------------------------------------
 
 cluster_names = {
-    0: "High Volume, Stable Demand",
-    1: "Growing Demand",
-    2: "Low Volume, High Volatility",
-    3: "Declining Demand"
+    0: "High Demand",
+    1: "Growing Products",
+    2: "Seasonal Products",
+    3: "Low Demand"
 }
 
-product["Demand Segment"] = product["Cluster"].map(cluster_names)
+product["Demand Segment"] = (
+    product["Cluster"]
+    .map(cluster_names)
+)
 
 # -------------------------------------------------------
 # KPI CARDS
 # -------------------------------------------------------
 
-st.subheader("📊 Segmentation Summary")
+st.subheader("📈 Segmentation KPIs")
 
 col1, col2, col3, col4 = st.columns(4)
 
 col1.metric(
-    "Sub-Categories",
-    product["SubCategory"].nunique()
+    "Products",
+    len(product)
 )
 
 col2.metric(
@@ -385,27 +289,26 @@ col3.metric(
 )
 
 col4.metric(
-    "Highest Profit",
-    f"${product['TotalProfit'].max():,.0f}"
+    "Average Sales",
+    f"${product['AverageSales'].mean():,.0f}"
 )
 
 st.divider()
 
 # -------------------------------------------------------
-# PRODUCT SEGMENT TABLE
+# PRODUCT TABLE
 # -------------------------------------------------------
 
-st.subheader("📋 Product Demand Segments")
+st.subheader("📋 Product Segments")
 
 display_cols = [
-    "SubCategory",
+    "Sub-Category",
     "Demand Segment",
     "TotalSales",
-    "TotalQuantity",
-    "AverageOrderValue",
+    "AverageSales",
+    "OrderCount",
     "SalesVolatility",
-    "GrowthRate",
-    "ProfitMargin"
+    "GrowthRate"
 ]
 
 st.dataframe(
@@ -419,20 +322,17 @@ st.dataframe(
 st.divider()
 
 # -------------------------------------------------------
-# DOWNLOAD CSV
+# DOWNLOAD REPORT
 # -------------------------------------------------------
 
 csv = product.to_csv(index=False).encode("utf-8")
 
 st.download_button(
-    "📥 Download Segmentation Report",
-    csv,
-    "Demand_Segmentation.csv",
-    "text/csv"
+    label="📥 Download Segmentation Report",
+    data=csv,
+    file_name="Demand_Segmentation.csv",
+    mime="text/csv"
 )
-
-st.divider()
-
 # -------------------------------------------------------
 # STOCKING STRATEGY
 # -------------------------------------------------------
@@ -441,31 +341,35 @@ st.subheader("📦 Recommended Stocking Strategy")
 
 st.success("""
 
-### 🟢 High Volume, Stable Demand
-• Maintain high inventory levels
-• Prioritize supplier availability
-• Keep safety stock
+### 🟢 High Demand Products
+• Maintain high inventory levels.
+• Prioritize supplier availability.
+• Keep sufficient safety stock.
+• Monitor weekly demand trends.
 
 ---
 
-### 🔵 Growing Demand
-• Increase stock gradually
-• Monitor demand monthly
-• Plan marketing campaigns
+### 🔵 Growing Products
+• Increase inventory gradually.
+• Monitor monthly growth.
+• Plan promotional campaigns.
+• Improve product visibility.
 
 ---
 
-### 🟡 Low Volume, High Volatility
-• Keep limited inventory
-• Order only when required
-• Avoid overstocking
+### 🟡 Seasonal Products
+• Stock according to seasonal demand.
+• Avoid excess inventory.
+• Forecast demand before peak seasons.
+• Review historical seasonal trends.
 
 ---
 
-### 🔴 Declining Demand
-• Reduce inventory
-• Bundle products with popular items
-• Consider discount strategies
+### 🔴 Low Demand Products
+• Reduce inventory levels.
+• Bundle with popular products.
+• Offer promotional discounts.
+• Consider product replacement if demand continues to decline.
 
 """)
 
@@ -475,43 +379,67 @@ st.divider()
 # BUSINESS INSIGHTS
 # -------------------------------------------------------
 
-top_product = product.loc[
+st.subheader("💼 Executive Insights")
+
+top_sales = product.loc[
     product["TotalSales"].idxmax()
 ]
 
-best_profit = product.loc[
-    product["TotalProfit"].idxmax()
+top_avg = product.loc[
+    product["AverageSales"].idxmax()
+]
+
+top_growth = product.loc[
+    product["GrowthRate"].idxmax()
 ]
 
 st.info(f"""
 
-### Executive Insights
+### Key Business Findings
 
-🏆 Highest Revenue Sub-Category
+🏆 Highest Revenue Product Category
 
-**{top_product['SubCategory']}**
+**{top_sales['Sub-Category']}**
 
-Sales: **${top_product['TotalSales']:,.2f}**
-
----
-
-💰 Most Profitable Sub-Category
-
-**{best_profit['SubCategory']}**
-
-Profit: **${best_profit['TotalProfit']:,.2f}**
+Total Sales:
+**${top_sales['TotalSales']:,.2f}**
 
 ---
 
-The segmentation helps identify which product groups require aggressive stocking,
-which should be monitored closely, and which may need inventory optimization.
+📈 Highest Average Sales
+
+**{top_avg['Sub-Category']}**
+
+Average Sales:
+**${top_avg['AverageSales']:,.2f}**
+
+---
+
+🚀 Fastest Growing Category
+
+**{top_growth['Sub-Category']}**
+
+Growth Rate:
+**{top_growth['GrowthRate']:.2%}**
+
+---
+
+Demand segmentation helps identify:
+
+• Products that require continuous stocking.
+
+• Products showing strong growth potential.
+
+• Seasonal products needing demand planning.
+
+• Low-demand products requiring inventory optimization.
 
 """)
 
 st.divider()
 
 # -------------------------------------------------------
-# ABOUT K-MEANS
+# ABOUT DEMAND SEGMENTATION
 # -------------------------------------------------------
 
 with st.expander("ℹ About Demand Segmentation"):
@@ -520,25 +448,61 @@ with st.expander("ℹ About Demand Segmentation"):
 
 ### K-Means Clustering
 
-K-Means is an unsupervised machine learning algorithm that groups similar products based on demand characteristics.
+K-Means is an unsupervised Machine Learning algorithm that groups products having similar demand characteristics.
+
+---
 
 ### Features Used
 
 - Total Sales
-- Quantity Sold
-- Average Order Value
-- Profit Margin
+- Average Sales
+- Number of Orders
 - Sales Volatility
 - Growth Rate
-- Average Discount
+
+---
 
 ### Business Benefits
 
-- Better inventory planning
-- Smarter warehouse allocation
-- Improved purchasing decisions
-- Reduced stockouts
-- Reduced overstocking
+✅ Better inventory planning
+
+✅ Demand-driven purchasing
+
+✅ Warehouse optimization
+
+✅ Reduced stock-outs
+
+✅ Reduced overstocking
+
+✅ Improved forecasting
+
+✅ Better product management
+
+""")
+
+st.divider()
+
+# -------------------------------------------------------
+# FINAL RECOMMENDATIONS
+# -------------------------------------------------------
+
+st.subheader("📌 Recommendations")
+
+st.warning("""
+
+### Recommended Actions
+
+📦 Maintain adequate inventory for high-demand products.
+
+📈 Closely monitor products with rapid growth.
+
+📅 Prepare inventory before seasonal demand peaks.
+
+💰 Review pricing strategies for low-performing products.
+
+📊 Re-run demand segmentation every month to capture changing market trends.
+
+🚚 Improve supplier coordination for fast-moving products.
 
 """)
 
@@ -551,5 +515,5 @@ st.divider()
 st.markdown("---")
 
 st.caption(
-    "Sales Forecasting & Demand Intelligence System | Product Demand Segmentation | Developed by Sravya Velaga"
+    "Sales Forecasting & Demand Intelligence System | Product Demand Segmentation Dashboard | Developed by Sravya Velaga"
 )

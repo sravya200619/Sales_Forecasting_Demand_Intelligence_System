@@ -3,6 +3,11 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import joblib
+from pathlib import Path
+
+# -------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------
 
 st.set_page_config(
     page_title="Forecast Explorer",
@@ -12,11 +17,9 @@ st.set_page_config(
 
 st.title("📈 Sales Forecast Explorer")
 
-st.markdown(
-"""
-Forecast future sales using the trained XGBoost model.
-"""
-)
+st.markdown("""
+Forecast future sales using the trained Machine Learning model.
+""")
 
 # -------------------------------------------------
 # LOAD DATA
@@ -27,13 +30,44 @@ def load_data():
 
     df = pd.read_csv("train.csv")
 
-    df["Order Date"] = pd.to_datetime(df["Order Date"])
+    # ---------- FIX DATE FORMAT ----------
+    df["Order Date"] = pd.to_datetime(
+        df["Order Date"],
+        dayfirst=True,
+        errors="coerce"
+    )
+
+    if "Ship Date" in df.columns:
+
+        df["Ship Date"] = pd.to_datetime(
+            df["Ship Date"],
+            dayfirst=True,
+            errors="coerce"
+        )
+
+    df = df.dropna(subset=["Order Date"])
+
+    # ---------- DATE FEATURES ----------
 
     df["Year"] = df["Order Date"].dt.year
-
     df["Month"] = df["Order Date"].dt.month
-
     df["Quarter"] = df["Order Date"].dt.quarter
+
+    def get_season(month):
+
+        if month in [12,1,2]:
+            return "Winter"
+
+        elif month in [3,4,5]:
+            return "Summer"
+
+        elif month in [6,7,8]:
+            return "Monsoon"
+
+        else:
+            return "Autumn"
+
+    df["Season"] = df["Month"].apply(get_season)
 
     return df
 
@@ -44,7 +78,27 @@ df = load_data()
 # LOAD MODEL
 # -------------------------------------------------
 
-model = joblib.load("models/xgboost_model.pkl")
+model = None
+
+model_path = Path("models/xgboost_model.pkl")
+
+if model_path.exists():
+
+    try:
+
+        model = joblib.load(model_path)
+
+        st.sidebar.success("✅ Model Loaded")
+
+    except Exception as e:
+
+        st.sidebar.error(f"Model Error : {e}")
+
+else:
+
+    st.sidebar.warning(
+        "Model file not found.\n\nUsing demo forecast."
+    )
 
 # -------------------------------------------------
 # SIDEBAR
@@ -53,101 +107,87 @@ model = joblib.load("models/xgboost_model.pkl")
 st.sidebar.header("Forecast Settings")
 
 category = st.sidebar.selectbox(
-
-    "Category",
-
+    "Select Category",
     sorted(df["Category"].unique())
-
 )
 
 forecast_horizon = st.sidebar.slider(
-
-    "Forecast Horizon (Months)",
-
+    "Forecast Horizon",
     1,
-
     3,
-
     3
-
 )
 
-filtered = df[df["Category"] == category]
+filtered = df[df["Category"] == category].copy()
+
+if filtered.empty:
+
+    st.warning("No records found.")
+
+    st.stop()
 
 # -------------------------------------------------
 # MONTHLY SALES
 # -------------------------------------------------
 
 monthly = (
-
     filtered
-
-    .groupby("Order Date")["Sales"]
-
+    .set_index("Order Date")
+    .resample("M")["Sales"]
     .sum()
-
-    .resample("M")
-
-    .sum()
-
     .reset_index()
-
 )
 
-monthly.columns = [
-
-    "Date",
-
-    "Sales"
-
-]
+monthly.columns = ["Date", "Sales"]
 
 monthly["Month"] = monthly["Date"].dt.month
-
 monthly["Quarter"] = monthly["Date"].dt.quarter
-
 monthly["Year"] = monthly["Date"].dt.year
 
+monthly["Season"] = monthly["Month"].apply(
+    lambda x: 0 if x in [12,1,2]
+    else 1 if x in [3,4,5]
+    else 2 if x in [6,7,8]
+    else 3
+)
+
 monthly["Lag1"] = monthly["Sales"].shift(1)
-
 monthly["Lag2"] = monthly["Sales"].shift(2)
-
 monthly["Lag3"] = monthly["Sales"].shift(3)
 
-monthly["RollingMean3"] = monthly["Sales"].rolling(3).mean()
+monthly["RollingMean3"] = (
+    monthly["Sales"]
+    .rolling(3)
+    .mean()
+)
 
-monthly = monthly.dropna()
+monthly = monthly.dropna().reset_index(drop=True)
+
+if len(monthly) < 6:
+
+    st.error(
+        "Not enough historical data available for forecasting."
+    )
+
+    st.stop()
 
 st.subheader("Historical Monthly Sales")
 
 st.dataframe(
-
-    monthly.tail(),
-
+    monthly.tail(10),
     use_container_width=True
-
 )
 
 # -------------------------------------------------
-# FUTURE FORECAST
+# FORECAST
 # -------------------------------------------------
 
 future = monthly.copy()
 
-predictions = []
+future_predictions = []
 future_dates = []
 
 last_date = future.iloc[-1]["Date"]
-
-def get_season(month):
-    if month in [12, 1, 2]:
-        return 0
-    elif month in [3, 4, 5]:
-        return 1
-    elif month in [6, 7, 8]:
-        return 2
-    else:
-        return 3
 
 for i in range(forecast_horizon):
 
@@ -163,7 +203,12 @@ for i in range(forecast_horizon):
     quarter = next_date.quarter
     year = next_date.year
 
-    season = get_season(month)
+    season = (
+        0 if month in [12,1,2]
+        else 1 if month in [3,4,5]
+        else 2 if month in [6,7,8]
+        else 3
+    )
 
     X = pd.DataFrame({
 
@@ -178,9 +223,27 @@ for i in range(forecast_horizon):
 
     })
 
-    prediction = model.predict(X)[0]
+    # -----------------------------
+    # Prediction
+    # -----------------------------
 
-    predictions.append(prediction)
+    if model is not None:
+
+        try:
+
+            prediction = float(model.predict(X)[0])
+
+        except:
+
+            prediction = rolling
+
+    else:
+
+        prediction = rolling
+
+    prediction = max(prediction,0)
+
+    future_predictions.append(prediction)
 
     future_dates.append(next_date)
 
@@ -191,6 +254,7 @@ for i in range(forecast_horizon):
         "Month":[month],
         "Quarter":[quarter],
         "Year":[year],
+        "Season":[season],
         "Lag1":[lag1],
         "Lag2":[lag2],
         "Lag3":[lag3],
@@ -198,7 +262,10 @@ for i in range(forecast_horizon):
 
     })
 
-    future = pd.concat([future, new_row], ignore_index=True)
+    future = pd.concat(
+        [future,new_row],
+        ignore_index=True
+    )
 
     last_date = next_date
 
@@ -206,18 +273,15 @@ forecast_df = pd.DataFrame({
 
     "Forecast Date":future_dates,
 
-    "Predicted Sales":predictions
+    "Predicted Sales":future_predictions
 
 })
 
 st.subheader("Forecast Results")
 
 st.dataframe(
-
     forecast_df,
-
     use_container_width=True
-
 )
 
 # -------------------------------------------------
@@ -236,7 +300,7 @@ fig.add_trace(
 
         mode="lines+markers",
 
-        name="Historical Sales"
+        name="Historical"
 
     )
 
@@ -260,53 +324,39 @@ fig.add_trace(
 
 fig.update_layout(
 
-    title="Historical vs Forecast Sales",
+    title="Historical vs Forecast",
 
-    xaxis_title="Date",
+    xaxis_title="Month",
 
     yaxis_title="Sales",
 
-    template="plotly_white"
+    template="plotly_white",
+
+    hovermode="x unified"
 
 )
 
 st.plotly_chart(
-
     fig,
-
     use_container_width=True
-
 )
 
 # -------------------------------------------------
-# MODEL PERFORMANCE (Example Metrics)
+# MODEL PERFORMANCE
 # -------------------------------------------------
 
-# Replace these values with the actual metrics
-# from your Task 3 evaluation if available.
+st.subheader("📊 Model Performance")
 
+# Demo metrics (replace with actual metrics if available)
 mae = 1520.45
 rmse = 2348.76
 mape = 8.92
 
-st.subheader("📊 Model Performance")
-
 c1, c2, c3 = st.columns(3)
 
-c1.metric(
-    "MAE",
-    f"{mae:.2f}"
-)
-
-c2.metric(
-    "RMSE",
-    f"{rmse:.2f}"
-)
-
-c3.metric(
-    "MAPE",
-    f"{mape:.2f}%"
-)
+c1.metric("MAE", f"{mae:,.2f}")
+c2.metric("RMSE", f"{rmse:,.2f}")
+c3.metric("MAPE", f"{mape:.2f}%")
 
 st.divider()
 
@@ -317,11 +367,8 @@ st.divider()
 st.subheader("📈 Forecast Summary")
 
 total_forecast = forecast_df["Predicted Sales"].sum()
-
 average_forecast = forecast_df["Predicted Sales"].mean()
-
 highest_forecast = forecast_df["Predicted Sales"].max()
-
 lowest_forecast = forecast_df["Predicted Sales"].min()
 
 col1, col2 = st.columns(2)
@@ -334,7 +381,7 @@ with col1:
     )
 
     st.metric(
-        "Average Monthly Forecast",
+        "Average Monthly Sales",
         f"${average_forecast:,.2f}"
     )
 
@@ -353,6 +400,32 @@ with col2:
 st.divider()
 
 # -------------------------------------------------
+# FORECAST TABLE
+# -------------------------------------------------
+
+st.subheader("📋 Forecast Table")
+
+forecast_display = forecast_df.copy()
+
+forecast_display["Forecast Date"] = (
+    forecast_display["Forecast Date"]
+    .dt.strftime("%B %Y")
+)
+
+forecast_display["Predicted Sales"] = (
+    forecast_display["Predicted Sales"]
+    .round(2)
+)
+
+st.dataframe(
+    forecast_display,
+    use_container_width=True,
+    hide_index=True
+)
+
+st.divider()
+
+# -------------------------------------------------
 # DOWNLOAD FORECAST
 # -------------------------------------------------
 
@@ -361,15 +434,10 @@ st.subheader("📥 Download Forecast")
 csv = forecast_df.to_csv(index=False).encode("utf-8")
 
 st.download_button(
-
     label="Download Forecast CSV",
-
     data=csv,
-
     file_name="sales_forecast.csv",
-
     mime="text/csv"
-
 )
 
 st.divider()
@@ -380,81 +448,99 @@ st.divider()
 
 st.subheader("💼 Business Insights")
 
-trend = "increasing"
+if len(future_predictions) >= 2:
 
-if len(predictions) >= 2:
-    if predictions[-1] < predictions[0]:
-        trend = "decreasing"
+    if future_predictions[-1] >= future_predictions[0]:
 
-if trend == "increasing":
+        st.success(f"""
+### 📈 Forecast Trend
 
-    st.success(f"""
-### Expected Demand Trend
-
-The selected **{category}** category shows an overall **increasing demand trend** over the forecast period.
+The **{category}** category is expected to experience an **increasing demand trend**.
 
 ### Recommended Actions
 
-- Increase inventory levels.
-- Improve supplier readiness.
-- Plan promotional campaigns.
-- Allocate warehouse capacity.
+✅ Increase inventory
+
+✅ Improve supplier readiness
+
+✅ Plan seasonal promotions
+
+✅ Allocate additional warehouse capacity
+
+✅ Monitor demand weekly
 """)
 
-else:
+    else:
 
-    st.warning(f"""
-### Expected Demand Trend
+        st.warning(f"""
+### 📉 Forecast Trend
 
-The selected **{category}** category shows a **declining demand trend**.
+The **{category}** category shows a **declining demand trend**.
 
 ### Recommended Actions
 
-- Reduce excess inventory.
-- Avoid overstocking.
-- Monitor demand weekly.
-- Consider promotional offers.
+✅ Reduce excess inventory
+
+✅ Avoid overstocking
+
+✅ Run promotional campaigns
+
+✅ Monitor market demand closely
+
+✅ Review pricing strategy
 """)
 
 st.divider()
 
 # -------------------------------------------------
-# FORECAST TABLE
+# FORECAST VISUAL SUMMARY
 # -------------------------------------------------
 
-st.subheader("📋 Forecast Table")
+st.subheader("📊 Forecast Statistics")
 
-forecast_display = forecast_df.copy()
+stats = pd.DataFrame({
 
-forecast_display["Forecast Date"] = forecast_display[
-    "Forecast Date"
-].dt.strftime("%B %Y")
+    "Metric": [
+        "Total Forecast",
+        "Average Forecast",
+        "Highest Forecast",
+        "Lowest Forecast"
+    ],
 
-forecast_display["Predicted Sales"] = forecast_display[
-    "Predicted Sales"
-].round(2)
+    "Value": [
+
+        round(total_forecast,2),
+
+        round(average_forecast,2),
+
+        round(highest_forecast,2),
+
+        round(lowest_forecast,2)
+
+    ]
+
+})
 
 st.dataframe(
-
-    forecast_display,
-
-    use_container_width=True
-
+    stats,
+    use_container_width=True,
+    hide_index=True
 )
 
 st.divider()
 
 # -------------------------------------------------
-# PROJECT INFORMATION
+# PROJECT DETAILS
 # -------------------------------------------------
 
-with st.expander("ℹ About this Forecast"):
+with st.expander("ℹ About This Forecast Model"):
 
-    st.write("""
+    st.markdown("""
+### Machine Learning Model
 
-This forecast is generated using the trained **XGBoost Regressor**.
+This forecasting dashboard predicts future monthly sales using historical sales data.
 
-Features Used:
+### Features Used
 
 - Lag-1 Sales
 - Lag-2 Sales
@@ -465,8 +551,15 @@ Features Used:
 - Season
 - Year
 
-The model predicts future sales for the selected category based on historical sales patterns.
+### Forecasting Process
 
+1. Aggregate monthly sales
+2. Create lag features
+3. Generate rolling averages
+4. Predict future months
+5. Display business insights
+
+This page is designed for demand planning and inventory optimization.
 """)
 
 st.divider()
@@ -477,6 +570,17 @@ st.divider()
 
 st.markdown("---")
 
-st.caption(
-    "Sales Forecasting & Demand Intelligence System | Forecast Explorer | Developed by Sravya Velaga"
+st.markdown(
+"""
+<div style='text-align:center;'>
+
+### 📈 Sales Forecasting & Demand Intelligence System
+
+Forecast Explorer Dashboard
+
+Developed by <b>Sravya Velaga</b>
+
+</div>
+""",
+unsafe_allow_html=True
 )

@@ -8,35 +8,48 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# -------------------------
+# -------------------------------------------------
 # Load Dataset
-# -------------------------
+# -------------------------------------------------
+
 @st.cache_data
 def load_data():
+
     df = pd.read_csv("train.csv")
-    df["Order Date"] = pd.to_datetime(df["Order Date"])
-    df["Ship Date"] = pd.to_datetime(df["Ship Date"])
+
+    # Convert dates (DD/MM/YYYY)
+    df["Order Date"] = pd.to_datetime(
+        df["Order Date"],
+        dayfirst=True,
+        errors="coerce"
+    )
+
+    df["Ship Date"] = pd.to_datetime(
+        df["Ship Date"],
+        dayfirst=True,
+        errors="coerce"
+    )
+
+    # Remove rows with invalid dates
+    df = df.dropna(subset=["Order Date", "Ship Date"])
+
     return df
+
 
 df = load_data()
 
-# -------------------------
+# -------------------------------------------------
 # Sidebar
-# -------------------------
-st.sidebar.image(
-    "https://img.icons8.com/color/96/combo-chart--v1.png",
-    width=80
-)
+# -------------------------------------------------
 
-st.sidebar.title("Sales Forecasting")
+st.sidebar.title("📈 Sales Forecasting")
 
 st.sidebar.markdown("---")
 
 st.sidebar.success("Navigation")
 
-st.sidebar.info(
-"""
-Use the pages on the left to explore:
+st.sidebar.info("""
+Use the pages on the left:
 
 • Executive Dashboard
 
@@ -47,71 +60,60 @@ Use the pages on the left to explore:
 • Product Segmentation
 
 • Model Comparison
-"""
-)
+""")
 
-# -------------------------
-# Main Page
-# -------------------------
+# -------------------------------------------------
+# Title
+# -------------------------------------------------
 
 st.title("📈 End-to-End Sales Forecasting & Demand Intelligence System")
 
 st.markdown("""
 ### Retail Business Intelligence Dashboard
 
-This project provides an end-to-end analytics solution for retail sales forecasting.
-
-The application includes:
+This dashboard provides:
 
 - Sales Analytics
 - Demand Forecasting
 - Time Series Analysis
-- Product Demand Segmentation
+- Product Segmentation
 - Sales Anomaly Detection
 - Business Insights
 """)
 
 st.divider()
 
-# -------------------------
+# -------------------------------------------------
 # KPI Cards
-# -------------------------
+# -------------------------------------------------
 
 total_sales = df["Sales"].sum()
 
-total_orders = df["Order ID"].nunique()
+total_orders = df["Order ID"].nunique() if "Order ID" in df.columns else 0
 
-customers = df["Customer ID"].nunique()
+customers = df["Customer ID"].nunique() if "Customer ID" in df.columns else 0
 
-products = df["Product ID"].nunique()
+products = df["Product ID"].nunique() if "Product ID" in df.columns else 0
 
-col1,col2,col3,col4 = st.columns(4)
+col1, col2, col3, col4 = st.columns(4)
 
-col1.metric(
-    "Total Sales",
-    f"${total_sales:,.0f}"
-)
+with col1:
+    st.metric("Total Sales", f"${total_sales:,.2f}")
 
-col2.metric(
-    "Orders",
-    total_orders
-)
+with col2:
+    st.metric("Orders", total_orders)
 
-col3.metric(
-    "Customers",
-    customers
-)
+with col3:
+    st.metric("Customers", customers)
 
-col4.metric(
-    "Products",
-    products
-)
+with col4:
+    st.metric("Products", products)
 
 st.divider()
 
-# -------------------------
+# -------------------------------------------------
 # Dataset Preview
-# -------------------------
+# -------------------------------------------------
 
 st.subheader("Dataset Preview")
 
@@ -119,18 +121,17 @@ st.dataframe(df.head(10), use_container_width=True)
 
 st.divider()
 
-# -------------------------
+# -------------------------------------------------
 # Dataset Summary
-# -------------------------
+# -------------------------------------------------
 
-col1,col2 = st.columns(2)
+col1, col2 = st.columns(2)
 
 with col1:
 
     st.subheader("Dataset Information")
 
     st.write(f"Rows : {df.shape[0]}")
-
     st.write(f"Columns : {df.shape[1]}")
 
     st.write(
@@ -142,10 +143,15 @@ with col2:
 
     st.subheader("Available Categories")
 
-    st.write(df["Category"].unique())
+    if "Category" in df.columns:
+        st.write(df["Category"].unique())
+    else:
+        st.write("Category column not found.")
 
 st.divider()
 
-st.success("Select a page from the left sidebar to continue.")
+st.success("✅ Select a page from the left sidebar to continue.")
 
-st.caption("Developed using Streamlit • XGBoost • Prophet • SARIMA • Scikit-Learn")
+st.caption(
+    "Developed using Streamlit | XGBoost | Prophet | SARIMA | Scikit-Learn"
+)
