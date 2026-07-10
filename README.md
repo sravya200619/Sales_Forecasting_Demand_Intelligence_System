@@ -113,7 +113,7 @@ streamlit run app.py
 - Performance Metrics
 
 Deployed Streamlit url
-https://sravya200619-sales-forecasting-demand-intelligence-s-app-qj8soc.streamlit.app/Forecast_Explorer
+https://sravya200619-sales-forecasting-demand-intelligence-s-app-qj8soc.streamlit.app
 
 Linkedin url
 www.linkedin.com/in/veera-venkata-lakshmi-sravya-velaga-a79a78378
